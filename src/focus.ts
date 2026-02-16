@@ -5,6 +5,8 @@ import boxen from 'boxen';
 import { isProductive, categorize } from './categorizer.js';
 import { getDb } from './database.js';
 import { checkRelevance } from './ai.js';
+import fs from 'fs';
+import path from 'path';
 
 export class FocusMonitor {
     protected targetMinutes: number;
@@ -23,6 +25,8 @@ export class FocusMonitor {
         'trace-cli', 'terminal', 'powershell', 'cmd', 'antigravity', 'system'
     ]);
 
+    private lockFile = path.join(process.env.USERPROFILE || '', '.tracecli', 'focus.lock');
+
     // Context Lock
     protected lockedApp: string | null = null;
     protected lockedTitle: string | null = null;
@@ -36,11 +40,38 @@ export class FocusMonitor {
     }
 
     async start() {
-        console.log(chalk.cyan.bold(`\n🔥 Focus Session Started: ${this.goalLabel}`));
-        console.log(chalk.dim(`   Goal: ${this.targetMinutes} minutes. Stay focused!\n`));
-        console.log(chalk.yellow(`   💡 Switch to your work window to lock context.\n`));
+        if (this.acquireLock()) {
+            console.log(chalk.cyan.bold(`\n🔥 Focus Session Started: ${this.goalLabel}`));
+            console.log(chalk.dim(`   Goal: ${this.targetMinutes} minutes. Stay focused!\n`));
+            console.log(chalk.yellow(`   💡 Switch to your work window to lock context.\n`));
 
-        this.intervalId = setInterval(() => this.tick(), 1000);
+            this.intervalId = setInterval(() => this.tick(), 1000);
+        } else {
+            console.log(chalk.red.bold('\n⚠️  Another focus or pomodoro session is already running!'));
+            console.log(chalk.dim('Please stop it before starting a new one.\n'));
+            process.exit(1);
+        }
+    }
+
+    private acquireLock(): boolean {
+        if (fs.existsSync(this.lockFile)) {
+            // Check if process is still alive (crude check)
+            const stats = fs.statSync(this.lockFile);
+            const now = Date.now();
+            if (now - stats.mtimeMs > 1000 * 60 * 60) { // 1 hour old lock is likely dead
+                fs.unlinkSync(this.lockFile);
+            } else {
+                return false;
+            }
+        }
+        fs.writeFileSync(this.lockFile, process.pid.toString());
+        return true;
+    }
+
+    private releaseLock() {
+        if (fs.existsSync(this.lockFile)) {
+            fs.unlinkSync(this.lockFile);
+        }
     }
 
     stop() {
@@ -49,6 +80,7 @@ export class FocusMonitor {
             this.intervalId = null;
         }
         this.endTime = new Date().toISOString();
+        this.releaseLock();
         this.saveSession();
     }
 
@@ -78,10 +110,8 @@ export class FocusMonitor {
                 // First non-whitelisted window becomes the Locked Context
                 this.lockedApp = appName;
                 this.lockedTitle = title;
-                console.log(chalk.dim(`   📍 Locked to context: ${chalk.white(this.lockedApp)} - ${chalk.white(this.lockedTitle.substring(0, 30))}\n`));
             } else {
                 if (appLower !== this.lockedApp.toLowerCase()) {
-                    // Different app = distracted
                     focused = false;
                 } else if (title !== this.lastTitle && (appLower.includes('chrome') || appLower.includes('edge') || appLower.includes('browser') || appLower.includes('firefox'))) {
                     // Same browser, different tab = check relevance
@@ -136,11 +166,15 @@ export class FocusMonitor {
 
         let ui = '';
         ui += `  ${chalk.dim('Goal:')}      ${chalk.bold.white(this.goalLabel)}\n`;
-        ui += `  ${chalk.dim('Locked To:')}  ${this.lockedApp ? chalk.white(this.lockedApp) : chalk.dim('None')}\n`;
+        ui += `  ${chalk.dim('Locked To:')}  ${this.lockedApp ? chalk.white(this.lockedApp) : chalk.yellow('Waiting for work window...')}\n`;
         ui += `  ${chalk.dim('Status:')}    ${focused ? chalk.green('⭐ Focused') : chalk.red('⚠️  Distracted')}\n`;
         ui += `  ${chalk.dim('Progress:')}  ${chalk.cyan(bar)} ${progress.toFixed(0)}%\n`;
         ui += `  ${chalk.dim('Focus Time:')} ${chalk.cyan(this.formatTime(elapsed))} / ${this.formatTime(target)}\n`;
-        ui += `  ${chalk.dim('Total Score:')} ${scoreStyle.bold(score.toFixed(0) + '%')}\n`;
+        ui += `  ${chalk.dim('Score:')}      ${scoreStyle.bold(score.toFixed(0) + '%')}\n`;
+
+        if (!focused && !this.whitelist.has(appName.toLowerCase())) {
+            ui += `\n  ${chalk.red.italic(`Currently on: ${appName}`)}`;
+        }
 
         logUpdate(boxen(ui, {
             title: chalk.bold.magenta('🧘 Contextual Focus'),
