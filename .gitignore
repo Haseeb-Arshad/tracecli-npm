@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.db
+*.log
+.env
+.tracecli/
+*.csv
+*.json
+!package.json
+!tsconfig.json
+!package-lock.json

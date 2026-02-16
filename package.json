@@ -1,0 +1,46 @@
+{
+  "name": "trace-cli-node",
+  "version": "0.1.0",
+  "description": "The terminal's black box for your digital life. A privacy-first activity monitor (Node.js Port).",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "tracecli": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "productivity",
+    "tracker",
+    "cli",
+    "windows",
+    "privacy",
+    "nodejs"
+  ],
+  "author": "Haseeb Arshad",
+  "license": "MIT",
+  "dependencies": {
+    "active-win": "^8.2.1",
+    "better-sqlite3": "^12.6.2",
+    "boxen": "^8.0.1",
+    "chalk": "^5.6.2",
+    "cli-table3": "^0.6.5",
+    "commander": "^14.0.3",
+    "date-fns": "^4.1.0",
+    "dotenv": "^17.3.1",
+    "figlet": "^1.10.0",
+    "gradient-string": "^3.0.0",
+    "log-update": "^7.1.0",
+    "systeminformation": "^5.31.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.2.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
