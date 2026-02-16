@@ -123,13 +123,13 @@ export async function handleAsk(question: string) {
 
     User Question: "${question}"
 
-    Response Format (JSON):
+    RESPONSE FORMAT (MUST BE VALID JSON):
     {
-        "thought": "Your reasoning about what the user wants",
+        "thought": "Reasoning about user intent",
         "intent": "SQL_QUERY" | "CLI_ACTION" | "GENERAL_INFO",
-        "sql": "SELECT ... (if SQL_QUERY)",
-        "action": "tracecli <command> (if CLI_ACTION)",
-        "message": "Direct answer (if GENERAL_INFO or clarification needed)"
+        "sql": "SELECT ... (only if SQL_QUERY)",
+        "action": "tracecli <command> (only if CLI_ACTION)",
+        "message": "Answer or explanation"
     }
     
     Rule: If it's a data query, translate it to SQLite. If they want to do something, suggest the command.

@@ -95,47 +95,60 @@ export class FocusMonitor {
         const appPath = win.owner.path?.toLowerCase() || '';
         const title = win.title;
 
-        const category = categorize(appName, title);
-        const productive = isProductive(category);
+        const cleanApp = appLower.replace('.exe', '');
 
         const onWhitelist = this.whitelist.has(appLower) ||
+            this.whitelist.has(cleanApp) ||
             Array.from(this.whitelist).some(w => appPath.includes(w) || appLower.includes(w)) ||
-            appLower.includes('terminal') || appLower.includes('antigravity');
+            appLower.includes('terminal') || appLower.includes('powershell') ||
+            appLower.includes('command processor') || appLower.includes('cmd');
 
-        let focused = productive || onWhitelist;
+        let status: 'FOCUSED' | 'DISTRACTED' | 'NEUTRAL' = 'NEUTRAL';
 
-        // Context Lock Logic
-        if (!onWhitelist) {
+        if (onWhitelist) {
+            status = 'NEUTRAL';
+        } else {
             if (!this.lockedApp) {
                 // First non-whitelisted window becomes the Locked Context
                 this.lockedApp = appName;
                 this.lockedTitle = title;
+                status = 'FOCUSED';
             } else {
-                if (appLower !== this.lockedApp.toLowerCase()) {
-                    focused = false;
-                } else if (title !== this.lastTitle && (appLower.includes('chrome') || appLower.includes('edge') || appLower.includes('browser') || appLower.includes('firefox'))) {
-                    // Same browser, different tab = check relevance
-                    if (this.relevanceCache.has(title)) {
-                        focused = this.relevanceCache.get(title)!;
+                const cleanLocked = this.lockedApp.toLowerCase().replace('.exe', '');
+                if (cleanApp === cleanLocked) {
+                    // Same app, check title if browser
+                    const isBrowser = appLower.includes('chrome') || appLower.includes('edge') || appLower.includes('browser') || appLower.includes('firefox');
+                    if (isBrowser && title !== this.lastTitle) {
+                        if (this.relevanceCache.has(title)) {
+                            status = this.relevanceCache.get(title) ? 'FOCUSED' : 'DISTRACTED';
+                        } else {
+                            this.checkRelevanceAsync(title);
+                            status = 'FOCUSED';
+                        }
+                    } else if (isBrowser && this.relevanceCache.has(title)) {
+                        status = this.relevanceCache.get(title) ? 'FOCUSED' : 'DISTRACTED';
                     } else {
-                        this.checkRelevanceAsync(title);
-                        // Stay focused for 1 tick while AI checks? Or use productive status?
+                        status = 'FOCUSED';
                     }
+                } else {
+                    status = 'DISTRACTED';
                 }
             }
         }
 
-        if (focused) {
+        // Apply time increments
+        if (status === 'FOCUSED') {
             this.actualFocusSeconds += 1;
-        } else {
+        } else if (status === 'DISTRACTED') {
             this.distractionSeconds += 1;
             if (this.lastTitle !== title) {
                 this.interruptionCount += 1;
             }
         }
+        // NEUTRAL doesn't count towards focus or distraction
 
         this.lastTitle = title;
-        this.updateUI(appName, title, focused);
+        this.updateUI(appName, title, status);
 
         if (this.actualFocusSeconds >= this.targetMinutes * 60) {
             this.stop();
@@ -154,7 +167,7 @@ export class FocusMonitor {
         process.exit(0);
     }
 
-    protected updateUI(appName: string, title: string, focused: boolean) {
+    protected updateUI(appName: string, title: string, status: 'FOCUSED' | 'DISTRACTED' | 'NEUTRAL') {
         const elapsed = this.actualFocusSeconds;
         const target = this.targetMinutes * 60;
         const progress = Math.min(100, (elapsed / target) * 100);
@@ -164,16 +177,23 @@ export class FocusMonitor {
         const score = this.calculateScore();
         const scoreStyle = score >= 80 ? chalk.green : score >= 50 ? chalk.yellow : chalk.red;
 
+        let statusText = '';
+        if (status === 'FOCUSED') statusText = chalk.green.bold('⭐ Focused');
+        else if (status === 'DISTRACTED') statusText = chalk.red.bold('⚠️  Distracted');
+        else statusText = chalk.yellow.bold('⏸  Neutral (System)');
+
         let ui = '';
         ui += `  ${chalk.dim('Goal:')}      ${chalk.bold.white(this.goalLabel)}\n`;
         ui += `  ${chalk.dim('Locked To:')}  ${this.lockedApp ? chalk.white(this.lockedApp) : chalk.yellow('Waiting for work window...')}\n`;
-        ui += `  ${chalk.dim('Status:')}    ${focused ? chalk.green('⭐ Focused') : chalk.red('⚠️  Distracted')}\n`;
+        ui += `  ${chalk.dim('Status:')}    ${statusText}\n`;
         ui += `  ${chalk.dim('Progress:')}  ${chalk.cyan(bar)} ${progress.toFixed(0)}%\n`;
         ui += `  ${chalk.dim('Focus Time:')} ${chalk.cyan(this.formatTime(elapsed))} / ${this.formatTime(target)}\n`;
         ui += `  ${chalk.dim('Score:')}      ${scoreStyle.bold(score.toFixed(0) + '%')}\n`;
 
-        if (!focused && !this.whitelist.has(appName.toLowerCase())) {
+        if (status === 'DISTRACTED') {
             ui += `\n  ${chalk.red.italic(`Currently on: ${appName}`)}`;
+        } else if (status === 'NEUTRAL' && !this.lockedApp) {
+            ui += `\n  ${chalk.dim.italic('Timer paused. Locked to work app on switch.')}`;
         }
 
         logUpdate(boxen(ui, {
@@ -243,7 +263,7 @@ export class PomodoroTimer extends FocusMonitor {
         }
     }
 
-    protected updateUI(appName: string, title: string, focused: boolean) {
+    protected updateUI(appName: string, title: string, status: 'FOCUSED' | 'DISTRACTED' | 'NEUTRAL') {
         if (this.phase === 'BREAK') {
             const elapsed = this.actualFocusSeconds;
             const target = this.targetMinutes * 60;
@@ -267,6 +287,6 @@ export class PomodoroTimer extends FocusMonitor {
             return;
         }
 
-        super.updateUI(appName, title, focused);
+        super.updateUI(appName, title, status);
     }
 }
