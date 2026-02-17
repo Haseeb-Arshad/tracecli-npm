@@ -61,10 +61,12 @@ async function callClaude(apiKey: string, prompt: string, model?: string) {
     return resp?.content?.[0]?.text;
 }
 
-async function askLLM(prompt: string): Promise<string | null> {
+async function askLLM(prompt: string, silent: boolean = false): Promise<string | null> {
     const [provider, apiKey, model] = getAIParams();
     if (!apiKey) {
-        console.log(chalk.yellow('⚠️  AI API Key not configured. Run "tracecli config setup" to get started.'));
+        if (!silent) {
+            console.log(chalk.yellow('⚠️  AI API Key not configured. Run "tracecli config setup" to get started.'));
+        }
         return null;
     }
 
@@ -101,7 +103,7 @@ export async function checkRelevance(goal: string, title: string): Promise<boole
     Consider broad categories (researching for the goal is relevant).
     Return ONLY "YES" or "NO".
     `;
-    const resp = await askLLM(prompt);
+    const resp = await askLLM(prompt, true);
     return resp?.trim().toUpperCase().includes('YES') || false;
 }
 

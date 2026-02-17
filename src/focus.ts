@@ -5,6 +5,7 @@ import boxen from 'boxen';
 import { isProductive, categorize } from './categorizer.js';
 import { getDb } from './database.js';
 import { checkRelevance } from './ai.js';
+import { getAIParams } from './config.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -32,11 +33,14 @@ export class FocusMonitor {
     protected lockedTitle: string | null = null;
     protected lastTitle: string | null = null;
     protected relevanceCache: Map<string, boolean> = new Map();
+    protected aiConfigured: boolean = true;
 
     constructor(minutes: number, goalLabel: string = 'Deep Work') {
         this.targetMinutes = minutes;
         this.goalLabel = goalLabel;
         this.startTime = new Date().toISOString();
+        const [, key] = getAIParams();
+        this.aiConfigured = !!key;
     }
 
     async start() {
@@ -148,6 +152,7 @@ export class FocusMonitor {
         // NEUTRAL doesn't count towards focus or distraction
 
         this.lastTitle = title;
+
         this.updateUI(appName, title, status);
 
         if (this.actualFocusSeconds >= this.targetMinutes * 60) {
@@ -194,6 +199,10 @@ export class FocusMonitor {
             ui += `\n  ${chalk.red.italic(`Currently on: ${appName}`)}`;
         } else if (status === 'NEUTRAL' && !this.lockedApp) {
             ui += `\n  ${chalk.dim.italic('Timer paused. Locked to work app on switch.')}`;
+        }
+
+        if (!this.aiConfigured) {
+            ui += `\n\n  ${chalk.yellow('⚠️  AI API Key not configured.')}\n  ${chalk.dim('   Run "tracecli config setup"')}`;
         }
 
         logUpdate(boxen(ui, {
