@@ -12,11 +12,41 @@ A privacy-first, local-only activity tracker and productivity assistant for deve
 
 ## Installation
 
-You can install TraceCLI globally via npm:
+### From NPM (Recommended)
+
+*Note: Once the package is available on the registry.*
 
 ```bash
 npm install -g tracecli
 ```
+
+### From GitHub
+
+You can install the latest version directly from the GitHub repository:
+
+```bash
+npm install -g Haseeb-Arshad/tracecli-npm
+```
+
+### Local Installation (For Developers)
+
+If you have the repository cloned locally, you can use `npm link` to make the `tracecli` command available globally:
+
+1.  Navigate to the project directory:
+    ```bash
+    cd trace-cli-node
+    ```
+2.  Install dependencies and build:
+    ```bash
+    npm install
+    npm run build
+    ```
+3.  Link the package:
+    ```bash
+    npm link
+    ```
+
+After linking, you can use the `tracecli` command anywhere in your terminal.
 
 ## Quick Start
 

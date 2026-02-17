@@ -26,6 +26,9 @@
     "LICENSE",
     "README.md"
   ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "author": "Haseeb Arshad",
   "license": "MIT",
   "dependencies": {
