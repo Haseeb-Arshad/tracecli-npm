@@ -1,7 +1,7 @@
 {
-  "name": "trace-cli-node",
-  "version": "0.1.0",
-  "description": "The terminal's black box for your digital life. A privacy-first activity monitor (Node.js Port).",
+  "name": "tracecli",
+  "version": "1.0.0",
+  "description": "A privacy-first, local-only activity tracker and productivity assistant for developers.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -20,6 +20,11 @@
     "windows",
     "privacy",
     "nodejs"
+  ],
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
   ],
   "author": "Haseeb Arshad",
   "license": "MIT",
