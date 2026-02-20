@@ -521,3 +521,53 @@ export function queryFocusSessions(targetDate?: string, limit = 20) {
         LIMIT ?
     `).all(limit) as any[];
 }
+
+export function getDailyAppUsageByHour(targetDate: string, apps?: string[]) {
+    const sqlite = getDb();
+    let query = `
+        SELECT 
+            strftime('%H', start_time) as hour,
+            app_name,
+            SUM(duration_seconds) as total_seconds
+        FROM activity_log
+        WHERE start_time LIKE ? || '%'
+    `;
+    const params: any[] = [targetDate];
+
+    if (apps && apps.length > 0) {
+        const placeholders = apps.map(() => '?').join(',');
+        query += ` AND app_name IN (${placeholders})`;
+        params.push(...apps);
+    }
+
+    query += " GROUP BY hour, app_name ORDER BY hour ASC, total_seconds DESC";
+
+    return sqlite.prepare(query).all(...params) as any[];
+}
+
+export function getDailyActivityTimeline(targetDate: string) {
+    const sqlite = getDb();
+    return sqlite.prepare(`
+        SELECT app_name, window_title, start_time, end_time, duration_seconds, category
+        FROM activity_log
+        WHERE start_time LIKE ? || '%'
+        ORDER BY start_time ASC
+    `).all(targetDate) as any[];
+}
+
+export function getAppUsageDistribution(appName: string, days = 30) {
+    const sqlite = getDb();
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = cutoff.toISOString().split('T')[0];
+
+    return sqlite.prepare(`
+        SELECT 
+            strftime('%H', start_time) as hour,
+            SUM(duration_seconds) / ? as avg_seconds
+        FROM activity_log
+        WHERE app_name = ? AND start_time >= ?
+        GROUP BY hour
+        ORDER BY hour ASC
+    `).all(days, appName, cutoffStr) as any[];
+}

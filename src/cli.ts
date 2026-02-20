@@ -27,7 +27,10 @@ import {
     getDomainBreakdown,
     getProductivityHeatmapData,
     getStreakInfo,
-    queryFocusSessions
+    queryFocusSessions,
+    getDailyAppUsageByHour,
+    getDailyActivityTimeline,
+    getAppUsageDistribution
 } from './database.js';
 import { ActivityTracker } from './tracker.js';
 import { SystemMonitor, getSystemInfo, getRunningProcesses } from './monitor.js';
@@ -321,36 +324,39 @@ program
 
 program
     .command('timeline')
-    .description('Show hourly activity breakdown')
+    .description('Show chronological activity timeline')
     .option('-d, --date <date>', 'Date (YYYY-MM-DD)')
     .action((options) => {
         initDb();
-        const date = options.date;
-        const acts = queryActivities(date, 200);
+        const date = options.date || new Date().toISOString().split('T')[0];
+        const acts = getDailyActivityTimeline(date);
+
         if (acts.length === 0) {
-            console.log(chalk.yellow('No data for this date.'));
+            console.log(chalk.yellow('\nNo activities found for this date.'));
             return;
         }
 
-        console.log(chalk.bold.cyan(`\n🕒 Hourly Timeline — ${date || 'Today'}\n`));
+        console.log(boxen(
+            chalk.bold.whiteBright(`⏳ Activity Timeline — ${date}`),
+            { padding: 0.5, borderColor: 'magenta', borderStyle: 'round' }
+        ));
 
-        // Group by hour
-        const hourly: Record<number, any[]> = {};
-        acts.reverse().forEach(a => {
-            const hour = new Date(a.start_time).getHours();
-            if (!hourly[hour]) hourly[hour] = [];
-            hourly[hour].push(a);
+        const table = new (Table as any)({
+            head: ['Time', 'Duration', 'Application', 'Activity / Window Title'],
+            style: { head: ['cyan', 'bold'] },
+            colWidths: [12, 12, 20, 50]
         });
 
-        Object.keys(hourly).forEach(h => {
-            const hour = parseInt(h);
-            const total = hourly[hour].reduce((acc, curr) => acc + curr.duration_seconds, 0);
-            console.log(`  ${chalk.bold.cyan(hour.toString().padStart(2, '0') + ':00')}  ─── ${formatDuration(total)}`);
-            hourly[hour].slice(0, 5).forEach(a => {
-                console.log(`    ${chalk.dim('•')} ${formatDuration(a.duration_seconds).padStart(6)}  ${chalk.white(a.app_name)}: ${chalk.dim(a.window_title.substring(0, 50))}`);
-            });
-            if (hourly[hour].length > 5) console.log(`    ${chalk.dim('... and ' + (hourly[hour].length - 5) + ' more')}`);
+        acts.forEach(act => {
+            const time = new Date(act.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const duration = formatDuration(act.duration_seconds);
+            const app = chalk.bold.cyan(act.app_name);
+            const title = act.window_title.length > 47 ? act.window_title.substring(0, 44) + '...' : act.window_title;
+
+            table.push([time, duration, app, title]);
         });
+
+        console.log(table.toString());
         console.log();
     });
 
@@ -663,8 +669,17 @@ program
     .command('heatmap')
     .description('Display productivity heatmap')
     .option('-w, --weeks <number>', 'Number of weeks to show', '20')
+    .option('-d, --day [date]', 'Show hourly heatmap for a specific day')
+    .option('-a, --app <apps...>', 'Filter by specific apps (for --day view)')
     .action((options) => {
         initDb();
+
+        if (options.day !== undefined) {
+            const targetDate = options.day === true ? new Date().toISOString().split('T')[0] : options.day;
+            showDailyHeatmap(targetDate, options.app);
+            return;
+        }
+
         const weeks = parseInt(options.weeks);
         const data = getProductivityHeatmapData(weeks);
         const streaks = getStreakInfo();
@@ -728,6 +743,56 @@ program
         console.log(`\n  ${chalk.dim('🔥 Current streak:')} ${chalk.bold.yellow(streaks.current_streak + ' days')}`);
         console.log(`  ${chalk.dim('🏆 Longest:       ')} ${chalk.bold.cyan(streaks.longest_streak + ' days')}`);
         console.log(`  ${chalk.dim('📅 Total Path:    ')} ${chalk.bold.white(streaks.total_days_tracked + ' days tracked')}\n`);
+    });
+
+program
+    .command('app-dist <appName>')
+    .description('Show typical application usage distribution')
+    .option('-n, --days <number>', 'Analyze last N days', '30')
+    .action((appName, options) => {
+        initDb();
+        const days = parseInt(options.days);
+        const data = getAppUsageDistribution(appName, days);
+
+        if (data.length === 0) {
+            console.log(chalk.yellow(`\nNo data found for '${appName}' in the last ${days} days.`));
+            return;
+        }
+
+        const hoursMap: Record<number, number> = {};
+        data.forEach(d => hoursMap[parseInt(d.hour)] = d.avg_seconds);
+        const maxAvg = Math.max(...Object.values(hoursMap), 1);
+
+        console.log(boxen(
+            chalk.bold.whiteBright(`📈 '${appName}' Usage Distribution (Avg over ${days} days)`),
+            { padding: 0.5, borderColor: 'yellow', borderStyle: 'round' }
+        ));
+
+        const getDistColor = (val: number) => {
+            const pct = val / maxAvg;
+            if (pct > 0.8) return chalk.green;
+            if (pct > 0.5) return chalk.greenBright;
+            if (pct > 0.2) return chalk.yellow;
+            if (pct > 0) return chalk.red;
+            return chalk.gray;
+        };
+
+        let row = '    ';
+        for (let h = 0; h < 24; h++) {
+            const avg = hoursMap[h] || 0;
+            const style = getDistColor(avg);
+            row += style(avg > 0 ? "█ " : "░ ");
+        }
+        console.log(row);
+
+        let labels = '    ';
+        for (let h = 0; h < 24; h++) {
+            labels += chalk.dim(h.toString().padStart(2, '0') + ' ');
+        }
+        console.log(labels);
+
+        const peakHour = Object.keys(hoursMap).reduce((a, b) => hoursMap[parseInt(a)] > hoursMap[parseInt(b)] ? a : b);
+        console.log(`\n  ${chalk.dim('Peak usage at:')} ${chalk.bold.white(peakHour.padStart(2, '0') + ':00')}\n`);
     });
 
 program
@@ -889,6 +954,66 @@ program
         console.log(chalk.bold.magenta('\n🔎 Recent Searches\n'));
         console.log(table.toString());
     });
+
+function showDailyHeatmap(targetDate: string, apps?: string[]) {
+    const data = getDailyAppUsageByHour(targetDate, apps);
+
+    if (data.length === 0) {
+        console.log(chalk.yellow(`\nNo activity data for ${targetDate}.`));
+        return;
+    }
+
+    const usageMap: Record<string, number[]> = {};
+    const hoursTracked = new Set<number>();
+
+    data.forEach(entry => {
+        const app = entry.app_name;
+        const hour = parseInt(entry.hour);
+        const duration = entry.total_seconds;
+        if (!usageMap[app]) usageMap[app] = Array(24).fill(0);
+        usageMap[app][hour] = duration;
+        hoursTracked.add(hour);
+    });
+
+    const sortedApps = Object.entries(usageMap)
+        .sort((a, b) => b[1].reduce((sum, curr) => sum + curr, 0) - a[1].reduce((sum, curr) => sum + curr, 0))
+        .slice(0, 15);
+
+    console.log(boxen(
+        chalk.bold.whiteBright(`📊 Hourly Activity Heatmap — ${targetDate}`),
+        { padding: 0.5, borderColor: 'cyan', borderStyle: 'round' }
+    ));
+
+    // Header
+    let header = ' '.repeat(22);
+    for (let h = 0; h < 24; h++) {
+        if (hoursTracked.has(h)) {
+            header += chalk.dim(h.toString().padStart(2, '0') + ' ');
+        } else {
+            header += chalk.gray('.. ');
+        }
+    }
+    console.log(header);
+
+    const getDurationColor = (seconds: number) => {
+        if (seconds === 0) return chalk.gray;
+        if (seconds > 1800) return chalk.green;
+        if (seconds > 900) return chalk.greenBright;
+        if (seconds > 300) return chalk.yellow;
+        return chalk.red;
+    };
+
+    sortedApps.forEach(([appName, hourlyStats]) => {
+        let row = chalk.bold(appName.substring(0, 20).padEnd(20)) + '  ';
+        hourlyStats.forEach(seconds => {
+            const style = getDurationColor(seconds);
+            row += style(seconds > 0 ? "█ " : "░ ");
+        });
+        console.log(row);
+    });
+
+    console.log(`\n  Legend: ${chalk.red('█')} <5m  ${chalk.yellow('█')} <15m  ${chalk.greenBright('█')} <30m  ${chalk.green('█')} >30m\n`);
+}
 
 export function run() {
     program.parse(process.argv);

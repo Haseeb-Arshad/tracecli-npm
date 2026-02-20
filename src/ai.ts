@@ -3,6 +3,7 @@ import { getDb, DB_PATH } from './database.js';
 import { isProductive } from './categorizer.js';
 import chalk from 'chalk';
 import boxen from 'boxen';
+import logUpdate from 'log-update';
 
 // Helper for native requests (avoiding heavy deps where possible)
 async function postJson(url: string, headers: Record<string, string>, data: any) {
@@ -108,6 +109,12 @@ export async function checkRelevance(goal: string, title: string): Promise<boole
 }
 
 export async function handleAsk(question: string) {
+    const [provider, apiKey, model] = getAIParams();
+    if (!apiKey) {
+        console.log(chalk.yellow('⚠️  AI API Key not configured. Run "tracecli config setup" to get started.'));
+        return;
+    }
+
     const schema = getSchema();
     const today = new Date().toISOString().split('T')[0];
 
@@ -137,43 +144,77 @@ export async function handleAsk(question: string) {
     Rule: If it's a data query, translate it to SQLite. If they want to do something, suggest the command.
     `;
 
-    console.log(chalk.dim('Thinking...'));
-    const resp = await askLLM(agentPrompt);
-    if (!resp) return;
+    const statusMsgs = [
+        "Consulting the neural networks...",
+        "Searching your digital history...",
+        "Aggregating activity patterns...",
+        "Synthesizing insights...",
+        "Finalizing the answer..."
+    ];
+
+    let currentMsgIndex = 0;
+    const interval = setInterval(() => {
+        const msg = statusMsgs[currentMsgIndex];
+        logUpdate(boxen(chalk.cyan(msg), {
+            title: '🤖 Trace AI',
+            borderColor: 'blue',
+            borderStyle: 'round',
+            padding: 0.5
+        }));
+        currentMsgIndex = (currentMsgIndex + 1) % statusMsgs.length;
+    }, 800);
+
+    const resp = await askLLM(agentPrompt, true);
+
+    if (!resp) {
+        clearInterval(interval);
+        logUpdate.clear();
+        console.log(chalk.red('Failed to get a response from AI.'));
+        return;
+    }
 
     try {
         const result = JSON.parse(resp.replace(/```json|```/g, '').trim());
 
-        if (result.thought) console.log(chalk.dim(`💭 ${result.thought}`));
-
         if (result.intent === 'SQL_QUERY' && result.sql) {
-            await executeSqlAndSummarize(result.sql, question);
-        } else if (result.intent === 'CLI_ACTION' && result.action) {
-            console.log('\n' + boxen(
-                `The AI suggests running this command:\n\n${chalk.bold.green(result.action)}\n\n(Note: Automatic execution is coming in a future update)`,
-                { title: '🤖 AI Suggestion', borderColor: 'yellow', padding: 1 }
-            ));
-        } else if (result.message) {
-            console.log('\n' + boxen(result.message, { title: '🤖 AI Answer', borderColor: 'cyan', padding: 1 }));
+            await executeSqlAndSummarize(result.sql, question, true);
+            clearInterval(interval);
+        } else {
+            clearInterval(interval);
+            logUpdate.clear();
+            if (result.intent === 'CLI_ACTION' && result.action) {
+                console.log('\n' + boxen(
+                    `The AI suggests running this command:\n\n${chalk.bold.green(result.action)}\n\n(Note: Automatic execution is coming in a future update)`,
+                    { title: '🤖 AI Suggestion', borderColor: 'yellow', padding: 1 }
+                ));
+            } else if (result.message) {
+                console.log('\n' + boxen(result.message, {
+                    title: chalk.bold.whiteBright('🤖 AI Answer'),
+                    borderColor: 'cyan',
+                    padding: 1,
+                    borderStyle: 'double'
+                }));
+            }
         }
     } catch (err) {
-        // Fallback to legacy SQL-only logic if JSON parsing fails
+        clearInterval(interval);
+        logUpdate.clear();
         await handleLegacyAsk(question, schema, today);
     }
 }
 
-async function executeSqlAndSummarize(sql: string, question: string) {
+async function executeSqlAndSummarize(sql: string, question: string, verbose = false) {
     const cleanedSql = sql.trim();
     if (!cleanedSql.toUpperCase().startsWith('SELECT')) {
         console.log(chalk.red('Safety Violation: Generated SQL is not a SELECT statement.'));
         return;
     }
 
-    console.log(chalk.dim(`Executing: ${cleanedSql}`));
     try {
         const sqlite = getDb();
         const rows = sqlite.prepare(cleanedSql).all();
         if (rows.length === 0) {
+            logUpdate.clear();
             console.log(chalk.yellow('\nNo data found matching your query.'));
             return;
         }
@@ -185,11 +226,19 @@ async function executeSqlAndSummarize(sql: string, question: string) {
         Provide a concise, friendly answer.
         `;
 
-        const answer = await askLLM(summaryPrompt);
+        const answer = await askLLM(summaryPrompt, true);
+        logUpdate.clear();
         if (answer) {
-            console.log('\n' + boxen(answer, { title: '📊 Query Result', borderColor: 'cyan', padding: 1 }));
+            const provider = getAIParams()[0];
+            console.log('\n' + boxen(`${answer}\n\n${chalk.dim('Powered by ' + provider)}`, {
+                title: chalk.bold.whiteBright('🤖 AI Answer'),
+                borderColor: 'cyan',
+                padding: 1,
+                borderStyle: 'double'
+            }));
         }
     } catch (err: any) {
+        logUpdate.clear();
         console.error(chalk.red(`SQL Error: ${err.message}`));
     }
 }
